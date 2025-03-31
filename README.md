@@ -1,69 +1,107 @@
-# Twitter's Recommendation Algorithm
 
-Twitter's Recommendation Algorithm is a set of services and jobs that are responsible for serving feeds of Tweets and other content across all Twitter product surfaces (e.g. For You Timeline, Search, Explore, Notifications). For an introduction to how the algorithm works, please refer to our [engineering blog](https://blog.twitter.com/engineering/en_us/topics/open-source/2023/twitter-recommendation-algorithm).
-
-## Architecture
-
-Product surfaces at Twitter are built on a shared set of data, models, and software frameworks. The shared components included in this repository are listed below:
-
-| Type | Component | Description |
-|------------|------------|------------|
-| Data | [tweetypie](tweetypie/server/README.md) | Core Tweet service that handles the reading and writing of Tweet data. |
-|      | [unified-user-actions](unified_user_actions/README.md) | Real-time stream of user actions on Twitter. |
-|      | [user-signal-service](user-signal-service/README.md) | Centralized platform to retrieve explicit (e.g. likes, replies) and implicit (e.g. profile visits, tweet clicks) user signals. |
-| Model | [SimClusters](src/scala/com/twitter/simclusters_v2/README.md) | Community detection and sparse embeddings into those communities. |
-|       | [TwHIN](https://github.com/twitter/the-algorithm-ml/blob/main/projects/twhin/README.md) | Dense knowledge graph embeddings for Users and Tweets. |
-|       | [trust-and-safety-models](trust_and_safety_models/README.md) | Models for detecting NSFW or abusive content. |
-|       | [real-graph](src/scala/com/twitter/interaction_graph/README.md) | Model to predict the likelihood of a Twitter User interacting with another User. |
-|       | [tweepcred](src/scala/com/twitter/graph/batch/job/tweepcred/README) | Page-Rank algorithm for calculating Twitter User reputation. |
-|       | [recos-injector](recos-injector/README.md) | Streaming event processor for building input streams for [GraphJet](https://github.com/twitter/GraphJet) based services. |
-|       | [graph-feature-service](graph-feature-service/README.md) | Serves graph features for a directed pair of Users (e.g. how many of User A's following liked Tweets from User B). |
-|       | [topic-social-proof](topic-social-proof/README.md) | Identifies topics related to individual Tweets. |
-|       | [representation-scorer](representation-scorer/README.md) | Compute scores between pairs of entities (Users, Tweets, etc.) using embedding similarity. |
-| Software framework | [navi](navi/README.md) | High performance, machine learning model serving written in Rust. |
-|                    | [product-mixer](product-mixer/README.md) | Software framework for building feeds of content. |
-|                    | [timelines-aggregation-framework](timelines/data_processing/ml_util/aggregation_framework/README.md) | Framework for generating aggregate features in batch or real time. |
-|                    | [representation-manager](representation-manager/README.md) | Service to retrieve embeddings (i.e. SimClusers and TwHIN). |
-|                    | [twml](twml/README.md) | Legacy machine learning framework built on TensorFlow v1. |
-
-The product surfaces currently included in this repository are the For You Timeline and Recommended Notifications.
-
-### For You Timeline
-
-The diagram below illustrates how major services and jobs interconnect to construct a For You Timeline.
-
-![](docs/system-diagram.png)
-
-The core components of the For You Timeline included in this repository are listed below:
-
-| Type | Component | Description |
-|------------|------------|------------|
-| Candidate Source | [search-index](src/java/com/twitter/search/README.md) | Find and rank In-Network Tweets. ~50% of Tweets come from this candidate source. |
-|                  | [cr-mixer](cr-mixer/README.md) | Coordination layer for fetching Out-of-Network tweet candidates from underlying compute services. |
-|                  | [user-tweet-entity-graph](src/scala/com/twitter/recos/user_tweet_entity_graph/README.md) (UTEG)| Maintains an in memory User to Tweet interaction graph, and finds candidates based on traversals of this graph. This is built on the [GraphJet](https://github.com/twitter/GraphJet) framework. Several other GraphJet based features and candidate sources are located [here](src/scala/com/twitter/recos). |
-|                  | [follow-recommendation-service](follow-recommendations-service/README.md) (FRS)| Provides Users with recommendations for accounts to follow, and Tweets from those accounts. |
-| Ranking | [light-ranker](src/python/twitter/deepbird/projects/timelines/scripts/models/earlybird/README.md) | Light Ranker model used by search index (Earlybird) to rank Tweets. |
-|         | [heavy-ranker](https://github.com/twitter/the-algorithm-ml/blob/main/projects/home/recap/README.md) | Neural network for ranking candidate tweets. One of the main signals used to select timeline Tweets post candidate sourcing. |
-| Tweet mixing & filtering | [home-mixer](home-mixer/README.md) | Main service used to construct and serve the Home Timeline. Built on [product-mixer](product-mixer/README.md). |
-|                          | [visibility-filters](visibilitylib/README.md) | Responsible for filtering Twitter content to support legal compliance, improve product quality, increase user trust, protect revenue through the use of hard-filtering, visible product treatments, and coarse-grained downranking. |
-|                          | [timelineranker](timelineranker/README.md) | Legacy service which provides relevance-scored tweets from the Earlybird Search Index and UTEG service. |
-
-### Recommended Notifications
-
-The core components of Recommended Notifications included in this repository are listed below:
-
-| Type | Component | Description |
-|------------|------------|------------|
-| Service | [pushservice](pushservice/README.md) | Main recommendation service at Twitter used to surface recommendations to our users via notifications.
-| Ranking | [pushservice-light-ranker](pushservice/src/main/python/models/light_ranking/README.md) | Light Ranker model used by pushservice to rank Tweets. Bridges candidate generation and heavy ranking by pre-selecting highly-relevant candidates from the initial huge candidate pool. |
-|         | [pushservice-heavy-ranker](pushservice/src/main/python/models/heavy_ranking/README.md) | Multi-task learning model to predict the probabilities that the target users will open and engage with the sent notifications. |
-
-## Build and test code
-
-We include Bazel BUILD files for most components, but not a top-level BUILD or WORKSPACE file. We plan to add a more complete build and test system in the future.
-
-## Contributing
-
-We invite the community to submit GitHub issues and pull requests for suggestions on improving the recommendation algorithm. We are working on tools to manage these suggestions and sync changes to our internal repository. Any security concerns or issues should be routed to our official [bug bounty program](https://hackerone.com/twitter) through HackerOne. We hope to benefit from the collective intelligence and expertise of the global community in helping us identify issues and suggest improvements, ultimately leading to a better Twitter.
-
-Read our blog on the open source initiative [here](https://blog.twitter.com/en_us/topics/company/2023/a-new-era-of-transparency-for-twitter).
+一、核心功能与架构
+Pushservice 的功能模块如下：
+mermaid
+graph TB
+    A[推送服务] --> B[用户特征构建]
+    A --> C[候选生成]
+    A --> D[模型预测]
+    A --> E[频率控制]
+    A --> F[多渠道分发]
+    
+    B --> B1[基础属性]
+    B --> B2[行为特征]
+    B --> B3[社交图谱]
+    B --> B4[设备信息]
+    
+    C --> C1[实时候选]
+    C --> C2[历史候选]
+    C --> C3[跨渠道候选]
+    
+    D --> D1[退订预测]
+    D --> D2[活跃度预测]
+    D --> D3[内容偏好]
+    
+    E --> E1[日推送上限]
+    E --> E2[疲劳间隔]
+    E --> E3[时段限制]
+    
+    F --> F1[应用推送]
+    F --> F2[邮件通知]
+    F --> F3[站内通知]
+其架构采用分层设计：
+前置过滤层剔除低质量内容。
+轻量排序层初步筛选。
+重量模型层进行深度优化。
+二、关键技术特性
+特征工程
+系统异步加载多维度特征：
+scala
+Future.join(userStore.get(userId), deviceInfoStore.get(userId), historyStore.get(...))
+动态频控
+根据用户状态调整推送上限：
+scala
+def getDefaultPushCap(target: Target): Future[Int] = {
+  target.targetUserState.map {
+    case UserState.Inactive => 1
+    case _ => configParamsBuilder.getDefaultPushCap
+  }
+}
+多模型决策
+集成多个预测模型：
+scala
+Future.join(optoutModelScorer.score(...), heavyRanker.score(...), pushcapModel.predict(...))
+三、数据流转与计算流程
+数据流转分为主动请求和系统触发两种模式：
+mermaid
+graph TD
+    A[用户推送请求] --> B{处理器选择}
+    B -->|主动请求| C[SendHandler]
+    B -->|系统触发| D[RefreshForPushHandler]
+    
+    C --> C1[构建目标用户]
+    C1 --> C2[候选项数据填充]
+    C2 --> C3[特征填充]
+    C3 --> C4[选择步骤/重过滤]
+    C4 --> E[发送推送]
+    
+    D --> D1[构建目标/检查资格]
+    D1 --> D2[获取候选项]
+    D2 --> D3[数据填充Hydration]
+    D3 --> D4[预排序过滤]
+    D4 --> D5[排序阶段]
+    D5 --> D6[选择步骤/重过滤]
+    D6 --> E
+    
+    E --> F{发送渠道}
+    F -->|推送通知| G[Ibis2Service]
+    F -->|应用内通知| H[NotificationService]
+存储体系：HDFS 存模型，Manhattan KV 存特征，Scribe 记日志。
+计算流程：特征拼接 → 轻量排序 → 深度排序 → 结果筛选。
+四、性能与优化
+异步并行：Future.join 加速数据加载。
+分级降级：高负载时禁用重排序。
+监控体系：实时追踪延迟和成功率。
+批量处理示例：
+scala
+expandCandidatesWithCopy(candidateDetails).flatMap { candidateDetailsWithCopy =>
+  candidateWithCopyNumStat.add(candidateDetailsWithCopy.size)
+}
+五、技术栈概览
+mermaid
+graph LR
+    A[存储] --> A1[HDFS]
+    A --> A2[Manhattan KV]
+    A --> A3[Memcache]
+    B[计算] --> B1[TensorFlow]
+    B --> B2[Finagle]
+    B --> B3[XLA]
+    C[服务] --> C1[Finatra]
+    C --> C2[ZooKeeper]
+    D[监控] --> D1[StatsReceiver]
+    D --> D2[Zipkin]
+六、总结
+Pushservice 通过分层架构、多模型协同和动态频控，实现精准推送。其优势在于：
+精准性：丰富的特征和实时反馈。
+可扩展性：分布式设计支持亿级规模。
+稳定性：多层次性能保障。
